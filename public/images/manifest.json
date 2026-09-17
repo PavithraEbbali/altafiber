@@ -1,0 +1,32 @@
+{
+  "hero-home": {
+    "w": 1200,
+    "h": 752,
+    "blur": "data:image/webp;base64,UklGRmIAAABXRUJQVlA4IFYAAAAwAgCdASoQAAoAA4BaJYwCdAEKV2mQ2aEEAAD+C9yCWHZ0MBfIcu2YrnUpEpSD0UM7XBEP3YT5Uw9WhVW8aOHbc0+jtROnXpHnjudzt0U2MGyA1VgAAA=="
+  },
+  "install-technician": {
+    "w": 1200,
+    "h": 752,
+    "blur": "data:image/webp;base64,UklGRmYAAABXRUJQVlA4IFoAAAAwAgCdASoQAAoAA4BaJYwCdAEQy0mqwfH1uAD42WTWnUwAx4SxFH0eBJaTf5io+xjzN05Wy8zSe3i9yu25LUP7zdlC184Ukfw55aRbcOn/b83h9JXYdgLAAAA="
+  },
+  "why-fiber-bg": {
+    "w": 1400,
+    "h": 878,
+    "blur": "data:image/webp;base64,UklGRkgAAABXRUJQVlA4IDwAAACQAQCdASoQAAoAA4BaJQBOgBY6tWAA/tChm40yoodKkguKiCT462XoKTIyj0NFihcqyRQEZEEHAQG0/AA="
+  },
+  "tv-living-room": {
+    "w": 1200,
+    "h": 752,
+    "blur": "data:image/webp;base64,UklGRmAAAABXRUJQVlA4IFQAAAAQAgCdASoQAAoAA4BaJYwCw7ECwQcwr4JgAP6KGKTvJz2vs6FEvbccoQP9naloQCVgymE0efyxyiWluNnyWcxeDaxjlHUtvXE5fKu0ZV/oLxpRAAA="
+  },
+  "wifi-gateway": {
+    "w": 1000,
+    "h": 627,
+    "blur": "data:image/webp;base64,UklGRlYAAABXRUJQVlA4IEoAAAAQAgCdASoQAAoAA4BaJQBOgCIL2I76f9wAAP7BsMGg/WWSpIZqDrZggui/lmjkARSeK0VE59BtvYGswKdIpYBAm05pB8Wa8QAAAA=="
+  },
+  "cta-home-evening": {
+    "w": 1400,
+    "h": 898,
+    "blur": "data:image/webp;base64,UklGRlIAAABXRUJQVlA4IEYAAAAQAgCdASoQAAoAA4BaJZACdAEWs+rPd04AAP7u6/2+VdyRYZ1Npw0yg4rwWBUT87j3cbXqfCkm42XwVfW1BXTFThBrl9QA"
+  }
+}

@@ -1,0 +1,898 @@
+# ai.wing — build changelog & architectural decisions
+
+Running log of every significant structural change, feature addition and
+architectural decision made on this project. Entries are append-only and
+newest-last, so a change can be traced and reverted without guesswork.
+
+---
+
+## [0.1.0] — Initial build: altafiber Authorized Retailer landing site
+
+### Stack
+- **Next.js 16** (App Router) + **React 19** + **TypeScript 7**
+- **Tailwind CSS v4** — tokens declared with `@theme` in `app/globals.css`;
+  there is deliberately no `tailwind.config.js`, v4 reads the CSS.
+- **lenis** — smooth scrolling, and the only animation dependency. Everything
+  else in the motion layer is hand-rolled (see *Animation architecture*).
+
+### Decision: centralized data architecture
+`lib/content.ts` is the single source of truth. No TSX file contains a
+hard-coded price, speed, fee or term. Changing a number there cascades to:
+- the hero price anchor
+- every plan card in every service line
+- the fine-print comparison grid
+- the FAQ answers
+- the footer legal block and the page metadata
+
+Implemented via:
+- `PlanItem` interface exactly as specified in the brief, plus three optional
+  presentation-only extras (`badge`, `tagline`, `unit`).
+- Selectors — `plansByLine()`, `getPlan()`, `leadPlan`, `startingPrice`,
+  `slowestMbps`, `fastestMbps`, `ctaLabel()`, `speedLabel()`. Layout files call
+  these, never the raw `plans` array.
+- `<PriceLockup plan={plan} />` is the only price renderer on the site. Visual
+  flex row: `$` symbol, dominant integer (2.5rem / 3rem / 3.5rem by size prop),
+  muted cents + `/mo`. Unpriced plans render "Custom" plus their qualifier
+  rather than an empty lockup.
+
+### Decision: data-driven section visibility
+`activeServiceSections` filters `serviceSections` down to lines that actually
+have plans. Cable and Mobile are declared in canonical order but hold zero
+plans, so they never render — no empty shells, no "call to ask" placeholders.
+`app/page.tsx` maps over the filtered list, so adding a Cable plan to
+`lib/content.ts` would make a Cable section appear in the correct slot with no
+layout edit.
+
+### Decision: CTA label rule lives in data, not markup
+`ctaLabel(plan)` returns `"Call to order"` when `plan.price` is a number and
+`"Call for pricing"` when it is not. Defined once so the two can never drift
+apart across sections. The header and footer are the only two places the raw
+phone number is the visible button text.
+
+### Decision: every `tel:` link renders through `<CallButton />`
+That component is what stamps `data-call-cta` (plus a `data-call-context` for
+analytics) onto the anchor, which makes the attribute structurally guaranteed
+rather than something to remember per usage. The one inline `tel:` link in the
+service-section footnote carries the attribute explicitly.
+
+### Brand system
+Colors were lifted from altafiber.com's compiled stylesheet (`dist/master.css`)
+where they ship as named Tailwind utilities, so these are the literal brand
+hexes rather than eyeballed approximations:
+
+| Token | Hex | altafiber class |
+|---|---|---|
+| `navy` | `#012639` | `.bg-navy-blue` |
+| `navy-reduced` | `#394758` | `.bg-navy-blue-reduced` |
+| `navy-light` | `#82939b` | `.bg-navy-blue-light` |
+| `dark-blue` | `#005bb5` | `.bg-dark-blue` |
+| `fiber-blue` | `#4294f7` | `.text-blue` |
+| `fiber-tint` | `#edf5ff` | `.bg-lightest-fiber-blue` |
+| `alta-green` | `#3dc37f` | `.bg-emerald` |
+| `alta-teal` | `#22d3c5` | `.bg-enterprise-green` |
+| `charcoal` | `#515156` | `.bg-charcoal-gray` |
+| `velvet` | `#101014` | `.bg-velvet-black` |
+| `light-gray` | `#ebebed` | `.bg-light-gray` |
+| `lightest-gray` | `#f6f6fa` | `.bg-lightest-gray` |
+| `off-white` | `#f6f6f6` | `.bg-off-white` |
+
+**Typography:** altafiber ships Gilroy, which is proprietary. Substituted
+**Figtree** via `next/font/google` — same geometric-humanist character, one
+self-hosted variable file, `display: swap`, so there is no FOUT and no layout
+shift.
+
+### Animation architecture
+Deliberately hand-rolled on IntersectionObserver + rAF + CSS transitions rather
+than a scroll library, because the brief asks for scroll-heavy motion *and*
+PageSpeed. What that buys: transitions live in CSS (compositor-only —
+`transform`, `opacity`, `clip-path`), observers disconnect after firing, and no
+rAF loop runs for an element that is off screen.
+
+Implemented in `lib/hooks.ts` and `components/fx/`:
+
+| Requirement | Implementation |
+|---|---|
+| Lenis smooth scrolling | `components/providers/SmoothScroll.tsx` — also intercepts `a[href^="#"]` so anchor nav eases |
+| Black hole / fiber-optic background | `fx/FiberField.tsx` — canvas, particles spiral into an event horizon with accretion rings |
+| Scroll-scrubbed assembly | `fx/GatewayAssembly.tsx` — home-network diagram builds in six scrubbed stages, reverses on scroll up |
+| Scroll-triggered text reveals | `ui/RevealText.tsx` — per-line masked slide-up |
+| Parallax depth | `fx/Parallax.tsx` — transform-only, sampled by `useScrollProgress` |
+| SVG path draw | `fx/FiberPaths.tsx` — `stroke-dashoffset` draw plus a travelling light pulse |
+| Magnetic buttons | `useMagnetic()` → `ui/MagneticButton.tsx` |
+| Clip-path wipes | `.wipe` utility, used by the fine-print table, FAQ and closing CTA |
+| 3D card tilt | `useTilt()` in `ui/PlanCard.tsx`, with a cursor-tracking sheen on the featured card |
+| Staggered grid entrance | `--reveal-delay` per index in the service and feature grids |
+| Infinite marquee | `ui/Marquee.tsx` — duplicated track translating `-50%`, pure CSS |
+
+**Guards on every effect:** `prefers-reduced-motion` collapses the whole system
+to a static page (global override at the end of `globals.css`); pointer effects
+short-circuit on `(hover: none)`; the canvas caps DPR at 1.5, scales particle
+count to area, and stops its loop when off screen *or* when the tab is hidden.
+
+### Verified content
+Every claim on the page was checked against altafiber.com before it was written.
+Plans, rates, terms and fees come from `/plans-and-pricing`, `/tv`,
+`/home-phone`, `/internet` and `/internet/fioptics-home-bundle`; the data policy
+comes from altafiber's help-center answer on data caps.
+
+Service lines confirmed: **Fiber, Bundles, TV, Phone**.
+Confirmed *not* offered, therefore omitted entirely: **Cable** (altafiber is
+100% fiber) and **Mobile** (absent from altafiber's product navigation).
+
+### Negative constraints honoured
+- No support-routing copy anywhere — the phrase and the concept are absent.
+- Hero keeps **both** the ZIP checker and a call button.
+- Plan/section CTAs read "Call to order" / "Call for pricing"; the raw number
+  appears as button text only in the header and footer.
+- No competitor bashing and no self-deprecating "we are only a channel" copy.
+- No empty sections and no "call to ask" placeholder cards.
+- No Broadband Facts label link.
+- No "Pricing observed [Date]" stamps — there are no date strings on the page.
+- No "Is this the official altafiber site?" FAQ.
+
+### Trust chips — deviation from the brief, and why
+The brief proposed `No Credit Checks`, `No Data Caps` and
+`Free eero Router Included` *(if verified)*. Verification result:
+
+- **No Data Caps** — verified. altafiber's help centre states it does not cap,
+  limit or throttle residential data. **Kept.**
+- **Free eero Router Included** — **contradicted** by altafiber's own pricing:
+  the 100 Mbps – 2 Gig tiers carry a $15/mo gateway rate, and Fioptics Home is
+  $20/mo except on 3 Gig. **Dropped** — it would be a false advertised
+  inclusion and a Google Ads misrepresentation risk.
+- **No Credit Checks** — no supporting statement found anywhere on
+  altafiber.com. **Dropped** as unverifiable.
+
+Replaced with claims that are each traceable to altafiber.com: `Symmetrical
+Speeds`, `99.99% Reliable`, `Free Activation`, `30-Day Money-Back Guarantee`.
+The real equipment costs are disclosed in full in the hardware grid instead.
+
+### Layout notes
+- Footer follows the `bestfiberinternet.us` pattern: brand block + link columns
+  on the top row, a dedicated "Offer details & required disclosures" band, then
+  a bottom bar with policy links left and copyright + reseller line right.
+- Disclosure bar is `sticky top-0`, header is `sticky top-9` beneath it, so the
+  retailer disclosure is on screen for the entire scroll and has no dismiss
+  control.
+- `overflow-x: clip` on `body`, `min-width: 0` on all elements and a `.shell`
+  wrapper with a 16px gutter guarantee no horizontal overflow at 320px.
+
+---
+
+## [0.1.1] — Correctness fixes found during verification
+
+### Fixed: hero H1 rendered invisible
+`globals.css` reveals masked lines with `.is-in > .line-mask > span`, which
+requires `is-in` on the **direct** parent. The hero had it on an ancestor two
+levels up, so the H1 stayed translated 108% down inside its own overflow clip.
+
+Rather than just move the class, the hero's entrance was converted from
+IntersectionObserver transitions to plain CSS animations (`.rise-auto`,
+`.line-mask.auto`, keyframes `rise-in` / `line-up`). Above-the-fold content now
+paints and animates without waiting on hydration, which keeps the H1 — the
+likely LCP element — off the JS critical path. `useInView` was dropped from
+`Hero.tsx` entirely.
+
+### Fixed: clip-path wipes could never trigger themselves
+`clip-path` participates in IntersectionObserver's intersection computation, so
+a `.wipe` element clipped to `inset(0 0 100% 0)` reports `intersectionRatio: 0`
+forever and can never observe its own entrance. The FAQ accordion and the
+closing CTA were both permanently invisible because of this; the hardware table
+happened to survive only because its observer sat on an unclipped parent.
+
+Fix: the observer never watches the clipped element. `Reveal`'s `wipe` variant
+now renders an unclipped wrapper that holds the ref, with the clip on a child,
+and `ClosingCta` does the same.
+
+Hardened `useInView` at the same time:
+- default threshold `0.16` -> `0.05`, rootMargin `-8%` -> `-10%`, which is far
+  more reliable for tall elements than a ratio threshold
+- added a "scrolled past" branch: if an element's bottom is already above the
+  viewport it is treated as in view, so a restored scroll position or a fast
+  fling can never strand content in its hidden pre-reveal state
+
+### Fixed: two call buttons rendered in the header on mobile
+The header rendered a wide button (`hidden sm:inline-flex`) and a compact one
+(`sm:hidden`). Passing `hidden` collided with `CallButton`'s own base
+`inline-flex`: both are `display` utilities, and stylesheet order decided the
+winner, so the "hidden" button stayed visible and both overflowed at 320px.
+
+Fix: one button. `showNumber` already hides the digits below `sm`, so a single
+`<CallButton label="Call" showNumber />` gives "Call" on mobile and
+"Call (888) 000-0000" from `sm` up. Also added `whitespace-nowrap` to the
+wordmark and shrank the disclosure bar type at mobile sizes so it stays on one
+line inside the fixed 2.25rem strip.
+
+### Fixed: "starting at" price was quoting a TV add-on
+`startingPrice` took the minimum across *all* plans, which is the $10 Stream TV
+/ Home Phone add-on — so the closing CTA read "Fiber from $10/mo" and the meta
+description matched. Both are internet claims, and neither add-on is sold
+without an internet plan.
+
+`startingPrice` and the hero's speed range are now scoped to the `fiber` line.
+The site reads $30/mo, which is also the figure altafiber publishes.
+
+### Fixed: footer top row had five children in a four-column grid
+The "Details" column wrapped onto a second row. Grid widened to five columns
+with a two-column intermediate at `sm`.
+
+### Polish
+- Black-hole core moved from 68%/50% to 72%/78% on wide screens; it previously
+  sat behind the availability card. Particle density raised (1 per 4200 px²,
+  cap 280).
+- Hardware cost pills set to `whitespace-nowrap`, with `$99.99/visit` and
+  `Ask on call` replacing the longer strings that wrapped inside the pill.
+
+### Hardened: rates and fees centralised further
+Bundle feature lists quoted component prices as literal strings
+(`"1 Gig symmetrical fiber — $50"`), so a price change updated the cards but
+left the bundle line items stale. Introduced exported `RATE` and `FEE` objects
+at the top of `lib/content.ts`; plan prices, bundle line items, the hardware
+grid and the FAQ answers all read from them.
+
+---
+
+## Verification results
+
+| Check | Result |
+|---|---|
+| `next build` | passes, `/` prerendered static |
+| `tsc --noEmit` | clean |
+| Price cascade (`fiber1g` 50 -> 55, data file only) | hero anchor, plan card and bundle line item all updated; 0 stale values; 0 TSX files touched |
+| Price/speed/fee literals in TSX | 0 |
+| Horizontal overflow at 320px | none — `scrollWidth === clientWidth === 320`; the only elements extending past the viewport are inside the marquee and the `slice`-cropped fiber SVG, both in `overflow: hidden` containers |
+| `tel:` links | 25, all carrying `data-call-cta` |
+| CTA labels outside header/footer | exactly `Call to order` and `Call for pricing`; no raw phone number as button text |
+| Section order | `top -> plans -> bundles -> tv -> phone -> hardware -> how-it-works -> why -> faq` |
+| Cable / Mobile sections in DOM | 0 / 0 |
+| Forbidden strings (support routing, Broadband Facts, date stamps, "official site" FAQ, unverified chips, competitor bashing) | 0 matches |
+| Headings | single `h1` |
+| Disclosure bar | present and sticky for the whole scroll, no dismiss control |
+
+---
+
+## [0.2.0] — Production readiness
+
+### Added: the four policy pages the footer was already linking to
+The footer shipped links to `/privacy`, `/terms`, `/accessibility` and
+`/do-not-sell`, and none of those routes existed — four dead links, and a
+reachable privacy policy is a Google Ads requirement for a landing page that
+drives calls.
+
+- `lib/legal.ts` holds the prose as structured `LegalDoc` data and imports
+  `site` from `lib/content.ts`, so the entity name, contact address, mailing
+  address, governing law and effective date resolve from one place.
+- `components/sections/LegalPage.tsx` renders any `LegalDoc` with the site's
+  own chrome: navy masthead, prose column, an "Other policies" aside and a
+  call CTA.
+- Four thin route files under `app/`, each exporting metadata derived from its
+  document.
+
+New `site` placeholders, all of which need real values before launch:
+`url`, `legalEntity`, `contactEmail`, `mailingAddress`, `policyEffectiveDate`,
+`governingLaw`.
+
+The privacy policy states plainly that the ZIP field is processed in the
+browser and transmits nothing — which is what the code actually does, and is
+worth saying rather than boilerplating around.
+
+**Note on the "no date stamps" constraint:** that rule targeted
+"Pricing observed [Date]" strings on the marketing page, and the marketing page
+still carries no date of any kind. The policy pages carry a conventional
+"Effective" date, because a privacy policy without one is incomplete. It is a
+placeholder in `site.policyEffectiveDate` and renders only on those four pages.
+
+### Added: 404, icon, robots, sitemap, structured data
+- `app/not-found.tsx` — 404 in the site's own chrome with a route back and a
+  call CTA, `robots: noindex`.
+- `app/icon.svg` — the wordmark's fiber-strand glyph on altafiber navy.
+- `app/robots.ts` and `app/sitemap.ts` — the sitemap is generated from
+  `legalDocs`, so adding a policy page adds its entry.
+- `components/StructuredData.tsx` — a schema.org `@graph` with `Organization`,
+  `WebSite`, `Service`, `OfferCatalog` and `FAQPage`, generated entirely from
+  `lib/content.ts`. Search engines penalise structured data that disagrees with
+  the visible page, and deriving both from one source makes that impossible.
+  Plans with no published rate emit no `price`, so the markup never asserts a
+  number the page is not showing.
+- `metadataBase` + canonical on the layout so OG and canonical URLs resolve
+  absolutely.
+
+### Fixed: WCAG AA contrast failures across nine text styles
+
+A first contrast pass reported zero failures. That result was wrong twice over
+and is worth recording so the mistake is not repeated:
+
+1. **The colour parser was broken.** Tailwind v4 emits `oklab(...)`, not
+   `rgb(...)`. A naive `match(/[\d.]+/g)` read `oklab(0.999 0.00004 0.00002 /
+   0.45)` as `r=0.999, g=0.00004, b=0.00002` — near-black instead of white —
+   and reported white-on-navy footer links at 1.05:1. The fix was to stop
+   parsing colours by hand and let the browser resolve them: paint the
+   background stack and then the text colour onto a 1×1 canvas and read the
+   pixel back. That handles `oklab`, alpha compositing and every other colour
+   space correctly.
+2. **The viewport was collapsed.** The re-run then reported 116 nodes and zero
+   failures, but the pane had zero width, so three quarters of the page had
+   zero-size rects and was silently skipped. With an explicit 1280×900
+   viewport the same audit walked 392 nodes and found nine failing styles.
+
+Measured floors against the real brand backgrounds:
+
+| Foreground on background | Minimum that passes |
+|---|---|
+| `charcoal` on white | full strength (7.89:1) — `/75` is only 4.13 |
+| `charcoal` on `lightest-gray` | full strength (7.32:1) — `/80` is 4.44 |
+| `white` on `navy` | `/50` (4.89:1) — `/45` is 4.22, `/40` is 3.63 |
+| `white` on `velvet` | `/45` (4.53:1) — `/40` is 3.82 |
+
+Applied across nine files: every `text-charcoal/55…/80` went to full strength,
+and every `text-white/40` and `/45` went to `/60`. The plan-card terms strip
+moved from `text-charcoal/80` to `text-charcoal` for the same reason.
+
+### Verified (all with an explicit viewport this time)
+
+| Check | Result |
+|---|---|
+| `next build` | passes, 9 routes prerendered static |
+| `tsc --noEmit` | clean |
+| Contrast, `/` | 392 text nodes, **0 failures**, lowest 4.51:1 |
+| Contrast, `/terms` | 86 text nodes, **0 failures**, lowest 5.37:1 |
+| Headings | one `h1` per page, no level jumps |
+| Accessible names | 0 interactive elements without one; 0 unlabelled form controls |
+| Landmarks | header / main / footer present, all 5 `nav`s labelled |
+| Decorative SVG | all hidden from assistive tech (directly or via an `aria-hidden` ancestor) |
+| `prefers-reduced-motion` | 6-rule override block confirmed present in the shipped CSS, covering `.reveal`, `.wipe`, `.line-mask`, `.tilt-card`, `.magnetic` and `.rise-auto` |
+| Horizontal overflow at 320px | none on `/`, `/privacy` or the 404 |
+| Routes | all 200; unknown path returns 404 |
+| JSON-LD | parses; 5 entities, 11 offers, 8 FAQ entries; **0 offers whose price is not visible on the page**; no unpriced plan asserted as an offer |
+| `tel:` links | 25 on `/`, 3 on the 404, all carrying `data-call-cta` |
+| CTA labels | 19 "Call to order", 4 "Call for pricing", no raw number outside header/footer |
+| Forbidden strings | 0 |
+| Price/speed/fee literals in TSX | 0 |
+
+### Removed
+`motion` was installed but never imported — the animation layer is hand-rolled.
+Dropped the dependency and the matching `optimizePackageImports` entry. Runtime
+dependencies are now `next`, `react`, `react-dom` and `lenis`.
+
+---
+
+## [0.3.0] — Hero redesign (client request)
+
+Three changes requested: drop the background animation, drop the hero call
+button, and rework the composition — it read as a generic template.
+
+### Removed: the animated hero background
+`fx/FiberField.tsx` (the black-hole canvas) is no longer mounted. The hero
+background is now entirely static: two radial washes plus a fine 88px grid
+masked to fade at the edges. Nothing in the hero background animates, and the
+rAF loop is gone from the page entirely.
+
+The component file is kept intact rather than deleted — there is no git history
+here to recover it from, and it is a working piece of work. Its header comment
+now says it is unmounted and how to drop it into the `#why` section, which is
+also navy, if an animated backdrop is wanted somewhere.
+
+**This leaves a brief requirement unmet.** The original spec asked for a black
+hole / fiber-optic background animation "in the Hero or technology section".
+It is now in neither. Relocating it to `#why` would satisfy the spec without
+putting it back in the hero.
+
+### Removed: the hero call button
+The standalone "Call to order" CTA beside the price anchor is gone. This
+reverses the brief's explicit "KEEP Hero Call Button" rule at the client's
+direction.
+
+The "Call to order" **inside the ZIP result panel** was kept. It only appears
+after a valid ZIP is submitted, and without it a successful availability check
+dead-ends with no way to convert. Page totals moved from 19 "Call to order" /
+25 `data-call-cta` to 18 / 24 — exactly one button removed.
+
+The ZIP checker is now the hero's only resting action, so it was promoted from
+a field inside a card to a full-width bar: 3.5rem tall, squared, with a solid
+alta-green submit.
+
+### Reworked: composition
+What made the old hero generic was the stack every SaaS landing page uses — a
+pill eyebrow, a gradient headline, a paragraph, buttons, pill chips, and a
+floating glassmorphic card on the right. Each of those was replaced with
+something that carries information rather than decoration:
+
+| Was | Now |
+|---|---|
+| Pill eyebrow with a pulsing dot | Rule + uppercase label, masthead-style |
+| Tri-colour gradient headline | Solid alta-green second line |
+| Glassmorphic card holding a ZIP field | **The fiber ladder** — a bordered data panel |
+| Pill trust chips | Rule-marked inline row |
+| Animated canvas backdrop | Static grid + radial washes |
+
+**The fiber ladder** is the new centrepiece and the reason the hero is no
+longer a template. It draws altafiber's five fiber tiers as proportional bars
+on a log scale — log, because 100 Mbps against 6 Gig on a linear scale
+collapses the low tier to a sliver; the bar is floored at 14% so it still reads
+as a bar. The lead plan is highlighted in alta-green and carries the
+`<PriceLockup />` price anchor above the list. Every tier, speed, price and
+badge comes from `plansByLine("fiber")`, so adding or repricing a tier in
+`lib/content.ts` redraws the ladder with no layout edit.
+
+### Two bugs caught in review of the first pass
+- **The ladder scale was wrong.** The lead plan's Down/Up bars sat in a panel
+  that was wider than the ladder's bar column, so 1 Gig at 62% of a wide track
+  rendered visibly *longer* than 6 Gig at 100% of a narrow one — the chart said
+  the opposite of the truth. Fixed by putting all five tiers in one list with a
+  single shared bar column; the separate Down/Up bars were dropped and the
+  symmetry claim is carried by the panel header and the lead plan's
+  "1 Gig down · 1 Gig up" line.
+- **The trust row stranded a divider.** Separators were rendered before every
+  item except the first, so when the row wrapped, a divider landed at the start
+  of the second line. Replaced with a uniform leading green rule on every item,
+  which is wrap-safe.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes, 9 routes static |
+| `tsc --noEmit` | clean |
+| `<canvas>` in hero | 0 |
+| `tel:` links in hero at rest | 0 |
+| Price anchor + ZIP checker in hero | both present |
+| Remaining hero animation | one-shot entrance reveals + the trust ticker only |
+| Contrast, `/` | 401 nodes, **0 failures**, lowest 4.74:1 |
+| Horizontal overflow at 320px | none |
+| `tel:` links page-wide | 24, all with `data-call-cta` |
+| CTA labels | 18 "Call to order", 4 "Call for pricing" |
+| Forbidden strings | 0 |
+| Price/speed literals in TSX | 0 |
+
+---
+
+## [0.4.0] — Light theme, brand alignment, copy pass
+
+Client supplied screenshots of altafiber.com and asked the site to match it
+exactly, with no dark theme; plus a copy pass, a new hero panel, removal of the
+network diagram, and a rename.
+
+### Converted: dark theme -> altafiber's light theme
+altafiber.com is a white site — black headings, bright-blue accents and CTAs,
+pale grey alternating bands, one dark gradient band, and a dark navy footer.
+The build now mirrors that.
+
+Added semantic roles to `@theme` rather than scattering raw hexes, so
+components state intent. All values are the official brand tokens already
+extracted from altafiber's stylesheet:
+
+| Role | Token | Hex |
+|---|---|---|
+| `ink` | velvet-black | `#101014` — headings |
+| `body` | charcoal-gray | `#515156` — body copy |
+| `accent` | dark-blue | `#005bb5` — CTAs and links |
+| `accent-bright` | fiber-blue | `#4294f7` — large accents, rules, motif |
+| `surface` | white | `#ffffff` |
+| `surface-alt` | lightest-gray | `#f6f6fa` — alternating bands |
+| `tint` | lightest-fiber-blue | `#edf5ff` — pale fills |
+| `line` | light-gray | `#ebebed` — hairlines |
+
+`accent` is the CTA colour rather than `accent-bright` because white on
+`#4294f7` is only 2.9:1, while white on `#005bb5` is 7.0:1.
+
+**Two surfaces are deliberately still dark, because altafiber's own site has
+them:** the "Why 100% fiber internet" band is a black-to-blue gradient exactly
+as on altafiber.com, and the footer is altafiber navy. Everything else is white
+or pale grey.
+
+### Added: the altafiber strand motif
+`fx/BrandWaves.tsx` reproduces altafiber's signature bundle of thin curved
+lines. It replaces `fx/FiberPaths.tsx` (deleted — strictly superseded) and
+carries the SVG path-draw animation: each strand draws itself in on entry.
+Used behind the hero and the plans section.
+
+### Rebuilt: the hero right panel
+The fiber ladder was replaced with a single premium plan card — offer ribbon,
+symmetrical download/upload read-out, `<PriceLockup />`, four inclusions, and a
+"Compare all plans" anchor (not a call button; the hero still has none). Every
+value resolves from `leadPlan`.
+
+### Removed: the scroll-scrubbed network diagram
+`GatewayAssembly` is no longer mounted in "How it works", which is now a clean
+three-across step layout with a connecting rule. **This drops the brief's
+scroll-scrubbed assembly animation requirement** — flagged, not forgotten.
+
+### Copy pass
+| Before | After |
+|---|---|
+| Future-proof fiber internet for your home. | 100% fiber internet, built for your home. |
+| Symmetrical fiber, straight to the house | Symmetrical speeds on every fiber plan |
+| Add TV or Home Phone and pay less for both | Bundle internet with TV or Home Phone |
+| Live TV and streaming in one place | Live television and streaming, unified |
+| A home line built on the same fiber drop | Reliable home phone service |
+| Hardware, fees and what is actually included | Equipment, fees and inclusions |
+| Three steps, one phone call | Three steps to getting connected |
+| What changes the day it goes in | Why 100% fiber internet |
+
+Section sublines were rewritten to match. The fiber subline no longer mentions
+ordering by phone, per the request.
+
+### Renamed: Fiber Direct -> altafiber
+`site.retailer` is now "altafiber", so every visible name — wordmark, metadata,
+footer, all four policy pages — follows from that one field. The wordmark is
+set as altafiber sets it: "alta" in ink, "fiber" in brand blue.
+
+**`site.legalEntity` was deliberately NOT renamed.** An authorized retailer
+cannot present itself as the carrier — that is a misrepresentation risk under
+Google Ads policy and a legal exposure. It is now the placeholder
+`[Legal entity name]` so the policy pages name the real operating company. The
+"Independent Authorized Retailer of altafiber" disclosure bar remains sticky
+and non-dismissable.
+
+### Three bugs caught in review
+- **Hydration mismatch in `BrandWaves`.** Full-precision floats serialise
+  differently on server and client (`0.6724900435477166` vs `…167`), which
+  React reported as a mismatch on every strand. Fixed by rounding
+  `strokeOpacity` to 3dp and every path coordinate to 2dp. Verified: 0 values
+  with 5+ decimals in the SSR output, and a clean console on a fresh server.
+- **Featured plan cards rendered invisible prices.** `PlanCard` passed
+  `invert={featured}` to `<PriceLockup />`. Featured cards became white in this
+  pass, so that meant white text on white — 4 prices at 1.0:1 contrast. The
+  lockup no longer inverts.
+- **The wordmark failed AA.** `#4294f7` on white is 3.08:1, fine for the 58px
+  H1 accent (needs 3.0) but not for 17px live text (needs 4.5). The wordmark's
+  "fiber" moved to `accent` at 7.0:1. A logo *image* would be exempt; live text
+  is not.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes, 9 routes static |
+| `tsc --noEmit` | clean |
+| Console on fresh load | **no errors**, hydration mismatch gone |
+| Contrast, `/` | 397 nodes, **0 failures**; lowest 3.08:1 is the 58px H1 accent, which needs 3.0 |
+| Page background | white; only the "Why fiber" gradient band and footer are dark, as on altafiber.com |
+| Network diagram | removed — 0 diagram SVGs, no residual copy |
+| `<canvas>` | 0 page-wide |
+| "Fiber Direct" | 0 occurrences |
+| Horizontal overflow at 320px | none on `/` or `/privacy` |
+| `tel:` links | 23, all with `data-call-cta` |
+| CTA labels | 17 "Call to order", 4 "Call for pricing" |
+| Price/speed literals in TSX | 0 |
+
+---
+
+## [0.5.0] — Hero restructured: no side card
+
+Client: the hero still read as a generic template because of the pricing card
+in the right column.
+
+They were right, and the cause was structural. With no photography available to
+sit opposite the copy, a boxed widget on the right is the default fallback —
+and it is exactly the shape that makes a hero look like a stock layout. Swapping
+one card design for another was never going to fix it.
+
+Rebuilt on altafiber.com's own structure instead — **no right column at all**:
+
+1. **Full-width availability strip** above the hero, which is where
+   altafiber.com puts its own "Check Availability" bar. `ZipChecker` was
+   re-laid-out as an inline row (label, underlined field, pill button).
+2. **A large typographic statement** — 5rem headline, black with a blue second
+   line, set to a 15ch measure so it holds the left two-thirds on its own.
+   Supporting paragraph and a "Compare plans" anchor share the baseline.
+3. **A horizontal spec band**, rule-separated into four cells. The price anchor
+   is the first cell — `<PriceLockup />` under the plan name — followed by the
+   speed range, the upload claim and reliability. The required price anchor is
+   still present; it just is not wrapped in a card.
+
+The strand motif sweeps the open right field, masked at its left edge so the
+strands emerge from behind the headline rather than crossing it.
+
+### Three bugs fixed in `BrandWaves` while wiring this up
+- **`preserveAspectRatio="xMidYMid slice"` cropped the bundle to one strand.**
+  The viewBox is 2.86:1 and the hero container is much taller than wide, so
+  `slice` scaled to cover and threw away almost everything. Changed to `none` —
+  these are abstract lines, so a non-uniform stretch is correct.
+- **The viewBox was hardcoded at `0 0 1200 420` while the geometry was not.**
+  Strand `i` sits at `y = 40 + i*gap` and swings 120 units below and 88*spread
+  above, so raising `count` or `gap` pushed most of the bundle outside the box.
+  The viewBox is now computed from the extents.
+- **1px hairlines at 25% opacity were invisible on a near-white ground.**
+  Stroke raised to 1.4px `non-scaling-stroke` and the alpha floor to 0.45.
+
+The motif is deliberately quiet — it sits behind a headline, so it reads as a
+texture rather than a graphic.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes |
+| `tsc --noEmit` | clean |
+| Cards in hero | **0** (`<article>` count) |
+| `tel:` links in hero | 0 |
+| Price anchor in hero | present |
+| Contrast, `/` | 386 nodes, **0 failures**; lowest 3.08:1 is the 80px H1 accent, which needs 3.0 |
+| Horizontal overflow at 320px | none |
+
+---
+
+## [0.6.0] — Hero: availability check moved inline, Compare plans removed
+
+- **Removed the "Compare plans" anchor.** The hero now has no buttons at all
+  except the availability submit — `heroButtons` is empty and `tel:` links in
+  the hero remain 0.
+- **Moved the availability check out of the top strip and into the hero body**,
+  directly beneath the supporting paragraph. The full-width band above the hero
+  is gone.
+
+`ZipChecker` was re-laid-out for the new placement: the label stacks above the
+field as an uppercase micro-label instead of sitting inline to its left, the
+input grew to 3.5rem with a 1.25rem value, and the helper line returned beneath
+it. Constrained to `max-w-2xl` so the field keeps a sensible measure against the
+hero's 15ch headline.
+
+Hero order is now: eyebrow → statement → paragraph → availability check →
+spec band → ticker.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes |
+| `tsc --noEmit` | clean |
+| Buttons/anchors in hero | none |
+| `tel:` links in hero | 0 |
+| Cards in hero | 0 |
+| Price anchor | present, in the spec band |
+| ZIP field position | 73px below the paragraph |
+| Horizontal overflow at 320px | none |
+
+---
+
+## [0.7.0] — Photography
+
+Seven generated images supplied. They arrived as 2.3 MB PNGs (16 MB total) at
+1408×768, not the aspect ratios in the brief, and each carried Gemini's sparkle
+watermark in the bottom-right corner.
+
+### Preprocessing
+A one-off sharp pass: trim 13% off the right edge (clears the watermark on all
+seven without touching any subject, since every composition sits centre or
+centre-left), resize, and convert to WebP at q82. Blur placeholders were
+generated at the same time into `public/images/manifest.json`.
+
+**16 MB → 821 KB.** The PNG originals were moved to `design-source/`, outside
+`public/`, so they never deploy.
+
+| File | Output | Size |
+|---|---|---|
+| `hero-home.webp` | 1200×752 | 85 KB |
+| `install-technician.webp` | 1200×752 | 139 KB |
+| `why-fiber-bg.webp` | 1400×878 | 151 KB |
+| `tv-living-room.webp` | 1200×752 | 95 KB |
+| `wifi-gateway.webp` | 1000×627 | 47 KB |
+| `cta-home-evening.webp` | 1400×898 | 171 KB |
+| `og-cover.jpg` | 1200×630 | 133 KB |
+
+### Placement
+`lib/images.ts` is the registry — intrinsic sizes and blur placeholders come
+from the manifest, alt text is written alongside the rest of the site copy.
+
+- **Hero** — bleeds off the right edge with a white fade into the copy, strand
+  motif riding over it, `priority` since it is the LCP element. Below `lg` it
+  runs as a band beneath the availability check rather than being dropped.
+- **How it works** — installation photograph beneath the three steps.
+- **Why 100% fiber** — dusk street behind the scrim.
+- **Fioptics+ TV** — living-room band above the plan cards.
+- **Equipment and fees** — router photograph beside the section heading.
+- **Closing CTA** — house at dusk behind the scrim.
+- **og:image + twitter:card** — wired into the layout metadata.
+
+The strand motif over the hero was dropped from opacity 1.0 / 34 strands to
+0.3 / 22, because at full weight over a photograph it read as moiré.
+
+### The contrast audit was wrong, twice, and it mattered
+
+Adding white text over photographs is exactly where the previous audit broke
+down, and it had been quietly wrong for several passes:
+
+1. **It substituted a hardcoded proxy for gradients.** Any `linear-gradient`
+   backdrop was scored against `#0a3a72` instead of the real colour. That hid a
+   genuine failure: the "Why fiber" and closing CTA gradients ended at
+   `#2f86f0`, which gives white text **3.63:1** — under the 4.5 AA floor. Both
+   gradients were re-cut so every stop clears 6:1.
+2. **It only walked ancestors.** Once the scrim became a *sibling* overlay above
+   an image, the walker found no opaque background and fell back to white,
+   scoring white-on-white at 1.0 and reporting it as a failure — noise that
+   would have masked anything real.
+
+Rewrote the resolver to composite what is actually painted: it walks ancestors,
+picks up absolutely-positioned sibling overlays, and for `<img>` siblings
+samples the real pixel under the text via canvas, accounting for `object-fit:
+cover` and `object-position`.
+
+With a trustworthy measurement it immediately found **three real failures** —
+the feature cards on the blue band used `bg-white/[0.08]`, tinting the backdrop
+*lighter* under white text (3.57, 3.79, 4.20). Cards now tint darker
+(`bg-navy/45`) and the body text went to `text-white/90`.
+
+The probe is saved for reuse in the session scratchpad as `contrast-probe.js`.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes |
+| `tsc --noEmit` | clean |
+| Images shipped | 7, **821 KB total** (from 16 MB) |
+| Images loading | all 7 (the 8th `<img>` node is the `lg:hidden` mobile hero, correctly not loaded on desktop) |
+| Missing `alt` | 0 — decorative backgrounds carry `alt=""` + `aria-hidden` |
+| Contrast, `/` (pixel-sampling audit) | 386 nodes, **0 failures**; lowest 3.08:1 is the 80px H1 accent, which needs 3.0 |
+| Scrim worst case (white pixel through lowest alpha) | 5.03:1 |
+| Horizontal overflow at 320px | none |
+
+---
+
+## [0.8.0] — Hero rebuilt on the photograph; photos as section backgrounds
+
+### Hero
+The panel-and-fade treatment was replaced. The photograph is now the section
+background, edge to edge and flush against the header, with a white gradient
+across its left half so the copy sits on clean white. No panel seam, and the
+strand motif was removed from the hero entirely.
+
+The gradient ramp is long (solid to 42%, then easing out to 88%) rather than
+short. A short ramp leaves a visible vertical seam where white meets photo; it
+still holds >=0.92 opacity out to 54%, past where the type ends.
+
+**On the reported gap between navbar and hero:** measured `heroTop === headerBottom
+=== 109` — there was never a gap in the layout. What read as one was the hero's
+own top padding on the white side. The full-bleed photograph now runs to the
+header edge, so it is unambiguous.
+
+### Photographs as section backgrounds
+- **How it works** — the technician photo is the whole section background under
+  a white scrim (0.93 → 0.84 top to bottom). The section keeps dark text, so
+  the scrim is white rather than dark. The standalone banner was removed as
+  redundant, and the step markers' `ring-surface-alt` became `ring-white/85`
+  since that background colour no longer exists here.
+- **Fioptics+ TV** — the living-room photo is the section background under a
+  deliberately thin dark scrim (0.54–0.66). That picture is a dark evening
+  room, so the section had to flip to light-on-dark: `SectionHead` inverts, the
+  footnote and its inline link invert, and the plan cards stay white.
+- **Closing CTA** — blue overlay reduced from 0.90–0.93 to 0.76–0.82 so the
+  house reads through it.
+
+### The contrast probe was wrong three more times
+
+Every one of these was the measuring tool, not the site — worth recording,
+because each failure mode looked exactly like a real defect:
+
+1. **Composited every gradient stop** instead of evaluating the gradient at the
+   element's position. Fixed by parsing the stops and interpolating at the
+   element's own x (or y, by gradient direction).
+2. **Prepended overlay siblings one at a time**, which reversed their paint
+   order — a scrim ended up painted *under* the image it was supposed to cover.
+3. **Never descended into nested overlays.** The hero's white wash is a child of
+   the image wrapper, not a sibling of the text, so the probe sampled the dark
+   photo and never applied the white on top — reporting the hero headline at
+   1.46:1 when it is fine.
+
+The rewritten resolver walks the ancestor chain top-down, collects each
+covering sibling's subtree in DOM (= paint) order, evaluates positional
+gradients at the element's coordinates, and samples real image pixels through
+`object-fit`/`object-position`. Under it: **386 nodes, 0 failures.**
+
+The lesson worth keeping: a contrast audit that cannot see what is actually
+painted will report confident nonsense in both directions — it hid a genuine
+3.63:1 gradient failure earlier, and here invented eight that did not exist.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes |
+| `tsc --noEmit` | clean |
+| Gap between header and hero | none — `heroTop === headerBottom` |
+| Strand motif in hero | removed |
+| Contrast, `/` (paint-order probe) | 386 nodes, **0 failures**; lowest 3.08:1 is the 68px H1 accent, which needs 3.0 |
+
+---
+
+## [0.8.1] — Hero white wash reduced further
+
+Gradient pulled back so more of the photograph shows:
+
+| | before | after |
+|---|---|---|
+| solid white to | 42% | **32%** |
+| ~0.9 opacity to | 54% | **47%** |
+| fully clear from | 88% | **79%** |
+
+The constraint is that the type column ends near 50% of the viewport, so the
+ramp still holds roughly 0.85 opacity there. Checked against the darkest pixel
+actually behind that point — sampled from the source file at x=50%,
+`rgb(30,16,5)` — body copy lands at **5.73:1**, above the 4.5 floor.
+
+Verified with the paint-order probe: 386 nodes, **0 failures**. Hero body copy
+measures 7.89:1 at element centre (which sits in the solid-white region); the
+5.73:1 figure above is the worst case at the right edge of the text, where the
+ramp has begun.
+
+---
+
+## [0.9.0] — Ambient motion
+
+### Hero
+- **Slow drift on the photograph** (`.hero-drift`) — 32s, scale 1.02 → 1.09
+  with a slight translate, alternating. Starts at 1.02 so no edge can be
+  revealed as it moves.
+- **Eyebrow rule draws itself out** from the left on load.
+- **Ambient colour wash** behind the copy, confined to the white side.
+
+### Other sections
+`components/fx/AmbientWash.tsx` — three oversized radial-gradient blobs in the
+brand palette drifting on long independent cycles (34s / 44s / 38s), so the
+pattern never visibly repeats. Applied to the light sections: fiber, bundles,
+phone, hardware and FAQ. The TV and "How it works" sections run on photographs
+and are left alone.
+
+**Performance:** every animation here moves `transform` only — no `filter`, no
+`background-position`, no width/height — so it all stays on the compositor and
+costs no layout or paint. Softness comes from the gradient stops rather than a
+blur filter, which would be expensive to animate continuously. All of it is
+switched off under `prefers-reduced-motion`.
+
+Blobs sit inside an `overflow-hidden` wrapper, so the oversized circles and
+their negative insets cannot create page overflow — confirmed at 320px.
+
+### A real regression, caught and fixed
+The probe was extended to evaluate **radial** gradients (interpolating by
+distance from the blob centre) as well as linear ones. With that in place it
+found a genuine failure the previous version could not see:
+
+The hero headline accent was `fiber-blue #4294f7`, which is 3.08:1 on white —
+a technical pass for large text but with no headroom. The blue ambient wash
+tints the backdrop blue behind blue text, dragging it to **2.85:1**, under the
+3.0 floor.
+
+Two fixes rather than one, so it cannot recur:
+- Added a `--color-headline-accent: #2b82ed` token (3.81:1 on white) used only
+  for the hero headline. `accent-bright` stays as-is for rules and dots, which
+  are decorative and not subject to text contrast.
+- Gave the hero a half-strength `subtle` wash tone, since that is the one place
+  a large blue headline sits over the wash.
+
+Lowest ratio on the page is now **3.74:1**, better headroom than the 3.08
+it had before this change.
+
+### Verified
+| Check | Result |
+|---|---|
+| `next build` | passes |
+| `tsc --noEmit` | clean |
+| Ambient washes | 18 blobs across hero + 5 light sections, all animating |
+| Contrast, `/` (probe now handles radial gradients) | 386 nodes, **0 failures**, lowest 3.74:1 |
+| Horizontal overflow at 320px | none; all blobs confirmed inside `overflow-hidden` |
+| `prefers-reduced-motion` | `.hero-drift`, `.ambient-blob` and `.rule-draw` all explicitly disabled |
+
+---
+
+## [0.9.1] — "How it works" photograph made visible
+
+The background photograph was barely readable under a 0.93–0.84 white scrim.
+
+**Why the scrim was that heavy:** measured the image's luminance across the
+visible band — minimum **0.000** (the technician's navy jacket), average 0.208.
+Body copy `#515156` needs a backdrop luminance of 0.549 to clear 4.5:1, which
+over that darkest pixel requires **0.80 white**. A flat scrim therefore cannot
+be both light enough to see the picture and dark enough to carry body text.
+
+Decoupled the two instead:
+- **Scrim dropped to 0.66 → 0.34** (a little stronger at the top for the
+  heading and at the very bottom for the section edge), so the photograph
+  reads clearly.
+- **The three steps moved onto solid white cards**, matching the card language
+  used by the plan cards, FAQ and hardware grid. Their body copy now sits on
+  opaque white regardless of what is behind the section.
+- The heading stays directly on the scrim: it is large text, so it only needs
+  3.0, and even over the darkest pixel it measures about 4.2:1.
+- Dropped the connecting rule between the steps, which no longer read correctly
+  once they became cards, and the `ring-8` halo on the number markers.
+
+### Verified
+| Check | Result |
+|---|---|
+| Contrast, `/` | 386 nodes, **0 failures**, lowest 3.64:1 (the 68px hero accent, needs 3.0) |
+| Worst element inside "How it works" | 6.04:1 |
