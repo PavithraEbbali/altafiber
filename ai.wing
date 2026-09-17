@@ -896,3 +896,57 @@ Decoupled the two instead:
 |---|---|
 | Contrast, `/` | 386 nodes, **0 failures**, lowest 3.64:1 (the 68px hero accent, needs 3.0) |
 | Worst element inside "How it works" | 6.04:1 |
+
+---
+
+## [1.0.0] — Mobile responsiveness, repo, Vercel readiness
+
+### A real mobile bug: the ZIP field collapsed to 26px
+The availability input carried `h-14` (56px) but measured **26px** on phones,
+while the button beside it with the same `h-14` measured 56px correctly.
+
+Cause: the input also had `flex-1`, and below `sm` the wrapper is `flex-col`.
+In a column flex container `flex-1` governs the **main axis, which is vertical**
+— `flex: 1 1 0%` overrode the height and collapsed the field to its content
+height. Changed to `sm:flex-1` so it only grows once the row layout starts, and
+the submit button goes full-width below `sm`.
+
+That was also a tap-target failure, and it had been shipping since the checker
+moved into the hero.
+
+### Other mobile fixes
+- **Type below 10px**: the disclosure bar (9px) and wordmark subtitle (9px)
+  raised to 10px with tighter tracking so the disclosure still holds one line
+  at 320px; spec-band labels 10px → 11px on phones.
+- **Tap targets**: wordmark given a taller hit area without moving anything
+  visually; the footer phone link was 33px, now `min-h-11`.
+- **Ambient blobs** were sized for desktop — 46rem circles swamp a 375px screen
+  and the drift reads as a flat wash. Scaled to 22rem/19rem below `sm`, and the
+  third blob is desktop-only so phones composite two layers per section rather
+  than three.
+
+Verified at **320, 375, 414 and 768**: zero horizontal overflow, zero tap
+targets under 40px, zero text under 10px, ZIP field 56px at every width.
+
+**On the images "not loading" on mobile:** `complete` read false for six
+visible images, but the network log showed every request returning 200/304 at
+the correct 640w variant. The browser pane throttles paint while its window is
+hidden — an environment artifact, not a defect. Checked rather than assumed.
+
+### Vercel readiness
+`siteUrl` in `lib/content.ts` now resolves at build time in this order:
+`NEXT_PUBLIC_SITE_URL` → `VERCEL_PROJECT_PRODUCTION_URL` → `VERCEL_URL` →
+the `site.url` placeholder. It drives the canonical tag, OG image URL,
+`robots.txt`, `sitemap.xml` and the JSON-LD, so preview deployments resolve
+correctly instead of pointing at a domain that does not exist. It is read only
+from server files, so the Vercel env vars are available.
+
+Also added: `engines: node >=20.9.0`, `.nvmrc`, and a README covering the
+content model, the pre-launch placeholder list and the deploy step.
+
+### Repo
+Initialised, committed and pushed to
+`https://github.com/PavithraEbbali/altafiber` on `main`. 67 files; `node_modules`,
+`.next` and the tool-local `.claude/` directory are ignored. `design-source/`
+(the 16 MB of PNG originals) is committed but sits outside `public/`, so it is
+version-controlled without ever being served or deployed.
